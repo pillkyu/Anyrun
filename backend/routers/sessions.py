@@ -12,63 +12,60 @@ from database import get_supabase
 
 router = APIRouter()
 
-import asyncio
-from datetime import timedelta
-
-async def cleanup_expired_sessions():
-    await asyncio.sleep(5)
-    
-    while True:
-        try:
-            supabase = get_supabase()
-            now = datetime.now()
-            
-            res = supabase.table("sessions").select("*").execute()
-            sessions = res.data
-            
-            expired_custom_ids = []
-            expired_fixed_sessions = []
-            
-            for s in sessions:
-                raw_event_time = s.get("event_time")
-                if isinstance(raw_event_time, str):
-                    try:
-                        parsed_time = datetime.fromisoformat(raw_event_time.replace('Z', '+00:00'))
-                        event_time = parsed_time.replace(tzinfo=None)
-                    except ValueError:
-                        continue
-                elif isinstance(raw_event_time, datetime):
-                    event_time = raw_event_time.replace(tzinfo=None)
-                else:
+@router.get("/cleanup")
+def cleanup_expired_sessions():
+    """
+    Endpoint triggered by Vercel Cron to clean up expired sessions.
+    """
+    try:
+        supabase = get_supabase()
+        now = datetime.now()
+        
+        res = supabase.table("sessions").select("*").execute()
+        sessions = res.data
+        
+        expired_custom_ids = []
+        expired_fixed_sessions = []
+        
+        for s in sessions:
+            raw_event_time = s.get("event_time")
+            if isinstance(raw_event_time, str):
+                try:
+                    parsed_time = datetime.fromisoformat(raw_event_time.replace('Z', '+00:00'))
+                    event_time = parsed_time.replace(tzinfo=None)
+                except ValueError:
                     continue
-                    
-                expiration_time = event_time + timedelta(minutes=5)
+            elif isinstance(raw_event_time, datetime):
+                event_time = raw_event_time.replace(tzinfo=None)
+            else:
+                continue
                 
-                if now >= expiration_time:
-                    if s.get("type") == "custom":
-                        expired_custom_ids.append(s["id"])
-                    elif s.get("type") == "fixed":
-                        expired_fixed_sessions.append(s)
+            expiration_time = event_time + timedelta(minutes=5)
             
-            if expired_custom_ids:
-                supabase.table("sessions").delete().in_("id", expired_custom_ids).execute()
-                print(f"🧹 [Auto-Cleanup] Removed {len(expired_custom_ids)} expired custom sessions from DB.")
-                
-            for fs in expired_fixed_sessions:
-                supabase.table("attendees").delete().eq("session_id", fs["id"]).execute()
-                
-                raw_event_time = fs.get("event_time")
-                parsed_time = datetime.fromisoformat(raw_event_time.replace('Z', '+00:00'))
-                new_event_time = parsed_time + timedelta(days=1)
-                
-                supabase.table("sessions").update({"event_time": new_event_time.isoformat()}).eq("id", fs["id"]).execute()
-                print(f"🔄 [Auto-Cleanup] Cleared attendees and rolled over fixed session '{fs.get('title')}' to {new_event_time}.")
-                
-        except Exception as e:
-            print(f"❌ [Auto-Cleanup Error]: {e}")
+            if now >= expiration_time:
+                if s.get("type") == "custom":
+                    expired_custom_ids.append(s["id"])
+                elif s.get("type") == "fixed":
+                    expired_fixed_sessions.append(s)
+        
+        if expired_custom_ids:
+            supabase.table("sessions").delete().in_("id", expired_custom_ids).execute()
+            print(f"🧹 [Auto-Cleanup] Removed {len(expired_custom_ids)} expired custom sessions from DB.")
             
-        await asyncio.sleep(60)
-
+        for fs in expired_fixed_sessions:
+            supabase.table("attendees").delete().eq("session_id", fs["id"]).execute()
+            
+            raw_event_time = fs.get("event_time")
+            parsed_time = datetime.fromisoformat(raw_event_time.replace('Z', '+00:00'))
+            new_event_time = parsed_time + timedelta(days=1)
+            
+            supabase.table("sessions").update({"event_time": new_event_time.isoformat()}).eq("id", fs["id"]).execute()
+            print(f"🔄 [Auto-Cleanup] Cleared attendees and rolled over fixed session '{fs.get('title')}' to {new_event_time}.")
+            
+        return {"status": "success", "message": "Cleanup executed"}
+    except Exception as e:
+        print(f"❌ [Auto-Cleanup Error]: {e}")
+        return {"status": "error", "message": str(e)}
 @router.get("/", response_model=dict)
 def get_sessions():
     supabase = get_supabase()

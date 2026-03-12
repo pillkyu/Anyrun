@@ -1,0 +1,62 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand-50: #eef2ff;
+  --color-brand-100: #e0e7ff;
+  --color-brand-500: #6366f1;
+  --color-brand-600: #4f46e5;
+  --color-brand-900: #312e81;
+
+  --color-background: #0f172a;
+  --color-card: #1e293b;
+  --color-card-hover: #334155;
+  --color-text-primary: #f8fafc;
+  --color-text-secondary: #94a3b8;
+}
+
+@layer base {
+  body {
+    background-color: var(--color-background);
+    color: var(--color-text-primary);
+    font-family: 'Inter', sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-brand-600 hover:bg-brand-500 text-white font-medium py-2 px-4 rounded-xl transition-all duration-300 transform hover:scale-[1.02] active:scale-95 shadow-lg shadow-brand-500/25;
+  }
+  
+  .btn-secondary {
+    @apply bg-card hover:bg-card-hover text-white font-medium py-2 px-4 rounded-xl border border-white/10 transition-all duration-300 transform hover:scale-[1.02] active:scale-95;
+  }
+
+  .btn-danger {
+    @apply bg-red-500/10 text-red-400 hover:bg-red-500/20 font-medium py-2 px-4 rounded-xl border border-red-500/20 transition-all duration-300 transform hover:scale-[1.02] active:scale-95;
+  }
+
+  .card-container {
+    @apply bg-card border border-white/5 rounded-2xl p-5 shadow-2xl backdrop-blur-sm transition-all duration-300 hover:border-brand-500/30;
+  }
+  
+  .input-field {
+    @apply w-full bg-[#0f172a] border border-white/10 rounded-xl px-4 py-3 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-all;
+  }
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-background);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-card-hover);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-brand-500);
+}
