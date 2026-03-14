@@ -1,4 +1,0 @@
-fastapi[standard]
-supabase
-python-dotenv
-pydantic
