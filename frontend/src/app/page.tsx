@@ -16,6 +16,7 @@ interface Session {
   max_participants: number;
   created_by: string;
   host_nickname?: string;
+  description?: string;
   current_participants?: number;
 }
 
@@ -42,23 +43,16 @@ export default function DashboardPage() {
   const [isClient, setIsClient] = useState(false);
   const [infoModalSessionId, setInfoModalSessionId] = useState<string | null>(null);
   const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [pendingAction, setPendingAction] = useState<{ type: 'join' | 'create', sessionId?: string } | null>(null);
 
   useEffect(() => {
     setIsClient(true);
-    const storedNickname = localStorage.getItem('nickname');
-    if (!storedNickname) {
-      setShowNicknameModal(true);
-    } else {
-      setNickname(storedNickname);
-    }
   }, []);
 
   useEffect(() => {
-    if (nickname) {
-      fetchSessions();
-      fetchAttendees();
-    }
-  }, [nickname]);
+    fetchSessions();
+    fetchAttendees();
+  }, []);
 
   const fetchSessions = async () => {
     setLoading(true);
@@ -79,29 +73,46 @@ export default function DashboardPage() {
     const { data, error } = await supabase
       .from('attendees')
       .select('*, sessions(id)');
-    
+
     if (error) {
-       console.error('Error fetching attendees:', error);
+      console.error('Error fetching attendees:', error);
     } else {
-       // Format or store as needed
-       setAttendees(data as any || []);
+      // Format or store as needed
+      setAttendees(data as any || []);
     }
   };
 
   const handleNicknameSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (tempNickname.trim()) {
-      localStorage.setItem('nickname', tempNickname.trim());
-      setNickname(tempNickname.trim());
+    const cleanNickname = tempNickname.trim();
+    if (cleanNickname) {
+      localStorage.setItem('nickname', cleanNickname);
+      setNickname(cleanNickname);
       setShowNicknameModal(false);
+
+      // Execute pending action
+      if (pendingAction) {
+        if (pendingAction.type === 'join' && pendingAction.sessionId) {
+          handleJoin(pendingAction.sessionId, cleanNickname);
+        } else if (pendingAction.type === 'create') {
+          setCreateModalOpen(true);
+        }
+        setPendingAction(null);
+      }
     }
   };
 
-  const handleJoin = async (sessionId: string, timePref?: 'morning' | 'afternoon') => {
-    if (!nickname) return;
+  const handleJoin = async (sessionId: string, providedNickname?: string) => {
+    const activeNickname = providedNickname || nickname;
+    if (!activeNickname) {
+      setPendingAction({ type: 'join', sessionId });
+      setTempNickname(''); // Clear previous inputs
+      setShowNicknameModal(true);
+      return;
+    }
 
     // Check if already joined
-    const alreadyJoined = attendees.some(a => a.session_id === sessionId && a.user_id === nickname);
+    const alreadyJoined = attendees.some(a => a.session_id === sessionId && a.user_id === activeNickname);
     if (alreadyJoined) {
       alert("이미 참여 중인 세션입니다.");
       return;
@@ -111,9 +122,8 @@ export default function DashboardPage() {
       .from('attendees')
       .insert({
         session_id: sessionId,
-        user_id: nickname,
-        user_nickname: nickname,
-        time_preference: timePref
+        user_id: activeNickname,
+        user_nickname: activeNickname
       });
 
     if (error) {
@@ -157,7 +167,9 @@ export default function DashboardPage() {
     const isJoined = sessionAttendees.some(a => a.user_id === nickname);
     const isFull = session.type === 'custom' && sessionAttendees.length >= session.max_participants;
     const expired = isPast(new Date(session.event_time));
-    const [timePref, setTimePref] = useState<'morning' | 'afternoon'>('morning');
+
+    // Fixed sessions always have 'Remi' as host
+    const hostName = session.type === 'fixed' ? 'Remi' : session.host_nickname;
 
     return (
       <div className="card-container flex flex-col h-full group bg-slate-800/40 border border-white/5 p-6 rounded-2xl hover:border-brand-500/30 transition-all">
@@ -167,8 +179,8 @@ export default function DashboardPage() {
               {session.type === 'fixed' ? '정규 세션' : '자율 세션'}
             </span>
             <h3 className="text-xl font-bold text-white group-hover:text-brand-400 transition-colors">{session.title}</h3>
-            {session.host_nickname && (
-               <p className="text-xs text-slate-500 mt-1">주최자: <span className="text-slate-300">{session.host_nickname}</span></p>
+            {hostName && (
+              <p className="text-xs text-slate-500 mt-1">주최자: <span className="text-slate-300">{hostName}</span></p>
             )}
           </div>
           <button
@@ -178,6 +190,14 @@ export default function DashboardPage() {
             <Info className="w-5 h-5" />
           </button>
         </div>
+
+        {session.description && (
+          <div className="mb-4 p-3 bg-white/5 rounded-xl border border-white/5">
+            <p className="text-xs text-slate-300 leading-relaxed italic">
+              "{session.description}"
+            </p>
+          </div>
+        )}
 
         <div className="space-y-2 mb-6 flex-1 text-sm text-slate-400">
           <div className="flex items-center gap-2">
@@ -194,20 +214,13 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {session.type === 'fixed' && !isJoined && !expired && (
-          <div className="mb-4 flex gap-2">
-            <button onClick={() => setTimePref('morning')} className={`flex-1 py-1 rounded-md text-sm border ${timePref === 'morning' ? 'bg-brand-500/20 border-brand-500 text-white' : 'border-white/10 text-slate-400'}`}>오전</button>
-            <button onClick={() => setTimePref('afternoon')} className={`flex-1 py-1 rounded-md text-sm border ${timePref === 'afternoon' ? 'bg-brand-500/20 border-brand-500 text-white' : 'border-white/10 text-slate-400'}`}>오후</button>
-          </div>
-        )}
-
         {isJoined ? (
           <button onClick={() => handleCancel(session.id)} className="w-full py-3 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 rounded-xl transition-all flex items-center justify-center gap-2">
             <X className="w-4 h-4" /> 참여 취소
           </button>
         ) : (
           <button
-            onClick={() => handleJoin(session.id, session.type === 'fixed' ? timePref : undefined)}
+            onClick={() => handleJoin(session.id)}
             disabled={isFull || expired}
             className="w-full py-3 bg-brand-600 hover:bg-brand-500 text-white rounded-xl transition-all flex items-center justify-center gap-2 disabled:opacity-50"
           >
@@ -249,46 +262,41 @@ export default function DashboardPage() {
         <header className="flex justify-between items-center mb-6">
           <div>
             <h1 className="text-3xl font-black italic tracking-tighter text-white">ANYRUN</h1>
-            <p className="text-sm text-brand-400 font-medium">Hello, {nickname || 'Runner'}</p>
+            <p className="text-sm text-brand-400 font-medium">Academy Running Community</p>
           </div>
-          {nickname && (
-            <button 
-                onClick={() => { localStorage.removeItem('nickname'); window.location.reload(); }}
-                className="p-2 text-slate-400 hover:text-white transition-colors"
-                title="닉네임 변경"
-            >
-              <LogOut className="w-5 h-5" />
-            </button>
-          )}
         </header>
 
         {/* Rules Section */}
         <section className="mb-10 bg-gradient-to-br from-brand-600/20 to-purple-600/20 border border-brand-500/20 rounded-3xl p-6 relative overflow-hidden">
-            <div className="relative z-10">
-                <h2 className="text-xl font-bold flex items-center gap-2 mb-3">
-                    <ShieldCheck className="w-5 h-5 text-brand-400" />
-                    이용 규칙 및 안내
-                </h2>
-                <ul className="space-y-2 text-sm text-slate-300">
-                    <li className="flex gap-2">
-                        <span className="text-brand-400 font-bold">•</span>
-                        <span>정규 세션은 평일 오전 8시 30분 대운동장에서 진행됩니다.</span>
-                    </li>
-                    <li className="flex gap-2">
-                        <span className="text-brand-400 font-bold">•</span>
-                        <span>자율 세션은 누구나 자유롭게 생성하고 참여할 수 있습니다.</span>
-                    </li>
-                    <li className="flex gap-2">
-                        <span className="text-brand-400 font-bold">•</span>
-                        <span>참여가 어려울 경우 다른 분들을 위해 반드시 참여 취소를 해주세요.</span>
-                    </li>
-                    <li className="flex gap-2 text-brand-300 font-medium">
-                        <span className="text-brand-400 font-bold">•</span>
-                        <span>매너 있는 러닝 문화를 함께 만들어가요!</span>
-                    </li>
-                </ul>
-            </div>
-            <div className="absolute -right-10 -bottom-10 w-40 h-40 bg-brand-500/10 blur-3xl rounded-full" />
+          <div className="relative z-10">
+            <h2 className="text-xl font-bold flex items-center gap-2 mb-3">
+              <ShieldCheck className="w-5 h-5 text-brand-400" />
+              이용 규칙 및 안내
+            </h2>
+            <ul className="space-y-2 text-sm text-slate-300">
+              <li className="flex gap-2">
+                <span className="text-brand-400 font-bold">•</span>
+                <span>정규 세션은 평일 오전 8시 30분 대운동장 트랙에서 진행됩니다.</span>
+              </li>
+              <li className="flex gap-2">
+                <span className="text-brand-400 font-bold">•</span>
+                <span>자율 세션은 누구나 자유롭게 생성하고 참여할 수 있습니다. (인원수는 장소에 맞게 설정해주세요)</span>
+              </li>
+              <li className="flex gap-2">
+                <span className="text-brand-400 font-bold">•</span>
+                <span>문의사항 및 세션 추가, 피드백등은 아래 링크로 보내주시면 감사하겠습니다!</span>
+              </li>
+              <li className="flex gap-2 text-brand-300 font-medium">
+                <span className="text-brand-400 font-bold"></span>
+                <span>
+                  <a href="https://open.kakao.com/o/sJMjoxli" target="_blank" rel="noopener noreferrer" className="hover:underline">
+                    https://open.kakao.com/o/sJMjoxli
+                  </a>
+                </span>
+              </li>
+            </ul>
+          </div>
+          <div className="absolute -right-10 -bottom-10 w-40 h-40 bg-brand-500/10 blur-3xl rounded-full" />
         </section>
 
         {/* Main Content */}
@@ -319,7 +327,15 @@ export default function DashboardPage() {
                   자율 세션
                 </h2>
                 <button
-                  onClick={() => setCreateModalOpen(true)}
+                  onClick={() => {
+                    if (!nickname) {
+                      setPendingAction({ type: 'create' });
+                      setTempNickname(''); // Clear previous inputs
+                      setShowNicknameModal(true);
+                    } else {
+                      setCreateModalOpen(true);
+                    }
+                  }}
                   className="bg-brand-600 hover:bg-brand-500 text-white px-5 py-2.5 rounded-xl font-bold transition-all shadow-lg shadow-brand-900/20 flex items-center gap-2 text-sm"
                 >
                   <Plus className="w-4 h-4" /> 세션 만들기
@@ -392,7 +408,7 @@ export default function DashboardPage() {
 
 function SessionAttendeesList({ sessionId, attendees }: { sessionId: string, attendees: Attendee[] }) {
   const sessionAttendees = attendees.filter(a => a.session_id === sessionId);
-  
+
   if (sessionAttendees.length === 0) return <p className="text-slate-500 text-sm text-center py-4">아직 참여자가 없습니다.</p>;
 
   return (
@@ -417,11 +433,13 @@ function SessionAttendeesList({ sessionId, attendees }: { sessionId: string, att
 }
 
 function CreateSessionModal({ onClose, onCreate }: { onClose: () => void, onCreate: (session: any) => void }) {
+  const now = new Date();
   const [title, setTitle] = useState('');
   const [location, setLocation] = useState('');
-  const [month, setMonth] = useState('03');
-  const [day, setDay] = useState('14');
-  const [hour, setHour] = useState('19');
+  const [description, setDescription] = useState('');
+  const [month, setMonth] = useState((now.getMonth() + 1).toString().padStart(2, '0'));
+  const [day, setDay] = useState(now.getDate().toString().padStart(2, '0'));
+  const [hour, setHour] = useState(now.getHours().toString().padStart(2, '0'));
   const [minute, setMinute] = useState('00');
   const [maxParticipants, setMaxParticipants] = useState('4');
 
@@ -432,6 +450,7 @@ function CreateSessionModal({ onClose, onCreate }: { onClose: () => void, onCrea
     onCreate({
       title,
       location,
+      description,
       event_time: isoDate,
       max_participants: parseInt(maxParticipants, 10)
     });
@@ -445,11 +464,24 @@ function CreateSessionModal({ onClose, onCreate }: { onClose: () => void, onCrea
         <form onSubmit={handleCreate} className="space-y-4">
           <div>
             <label className="text-xs text-slate-400 mb-2 block uppercase tracking-wider font-bold">세션 제목</label>
-            <input required type="text" className="w-full bg-slate-900/50 border border-white/10 rounded-xl px-4 py-3 outline-none focus:border-brand-500 transition-all" value={title} onChange={e => setTitle(e.target.value)} placeholder="예: 한강 야간 러닝" />
+            <input required type="text" className="w-full bg-slate-900/50 border border-white/10 rounded-xl px-4 py-3 outline-none focus:border-brand-500 transition-all" value={title} onChange={e => setTitle(e.target.value)} placeholder="예: 야간 철길숲 산책" />
           </div>
           <div>
             <label className="text-xs text-slate-400 mb-2 block uppercase tracking-wider font-bold">활동 장소</label>
-            <input required type="text" className="w-full bg-slate-900/50 border border-white/10 rounded-xl px-4 py-3 outline-none focus:border-brand-500 transition-all" value={location} onChange={e => setLocation(e.target.value)} placeholder="예: 반포대교 남단" />
+            <input required type="text" className="w-full bg-slate-900/50 border border-white/10 rounded-xl px-4 py-3 outline-none focus:border-brand-500 transition-all" value={location} onChange={e => setLocation(e.target.value)} placeholder="예: 철길숲" />
+          </div>
+          <div>
+            <div className="flex justify-between mb-2">
+              <label className="text-xs text-slate-400 block uppercase tracking-wider font-bold">모임 설명</label>
+              <span className="text-[10px] text-slate-500">{description.length}/100</span>
+            </div>
+            <textarea
+              maxLength={100}
+              className="w-full bg-slate-900/50 border border-white/10 rounded-xl px-4 py-3 outline-none focus:border-brand-500 transition-all min-h-[80px] text-sm"
+              value={description}
+              onChange={e => setDescription(e.target.value)}
+              placeholder="모임 위치, 진행 시간, 달리기 속도, 뒷풀이 여부 등 자유롭게 정보를 입력해주세요"
+            />
           </div>
           <div className="grid grid-cols-4 gap-2">
             <div>
